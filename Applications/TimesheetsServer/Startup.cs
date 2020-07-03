@@ -13,7 +13,12 @@ using Timesheets.ProjectClient;
  using Steeltoe.Common.Discovery;
 using Microsoft.Extensions.Logging;
 using Steeltoe.CircuitBreaker.Hystrix;
-
+using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Steeltoe.Security.Authentication.CloudFoundry;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 namespace TimesheetsServer
 {
     public class Startup
@@ -30,7 +35,20 @@ namespace TimesheetsServer
         {
             services.AddCloudFoundryActuators(Configuration);
 
-            services.AddControllers();
+                      services.AddControllers(mvcOptions =>
+            {
+                if (!Configuration.GetValue("DISABLE_AUTH", false))
+                {
+                    // Set Authorized as default policy
+                   var policy = new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
+                        .RequireAuthenticatedUser()
+                       .RequireClaim("scope", "uaa.resource")
+                        .Build();
+
+               }
+           });
+           services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
             services.AddDiscoveryClient(Configuration);
 
             services.AddDbContext<TimeEntryContext>(options => options.UseMySql(Configuration));
@@ -45,10 +63,18 @@ namespace TimesheetsServer
                 };
 
                                var logger = sp.GetService<ILogger<ProjectClient>>();
-                 return new ProjectClient(httpClient, logger);
-             });
+                                var contextAccessor = sp.GetService<IHttpContextAccessor>();
+
+               return new ProjectClient(
+                   httpClient, logger,
+                   () => contextAccessor.HttpContext.GetTokenAsync("access_token")
+               );
+            });
 
              services.AddHystrixMetricsStream(Configuration);
+
+              services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                 .AddCloudFoundryJwtBearer(Configuration);
             
         }
 
